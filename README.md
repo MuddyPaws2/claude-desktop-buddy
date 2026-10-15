@@ -72,10 +72,12 @@ log rather than disabling the watchdog.
 Once running, you can also wipe everything from the device itself: **hold A
 → settings → reset → factory reset → tap twice**.
 
-If startup reports `[char] LittleFS mount failed`, ASCII pets can still run,
-but GIF installation needs an initialized filesystem. The factory-reset
-action above formats it and also clears settings, statistics, and BLE bonds;
-the firmware does not automatically format storage on a mount failure.
+The firmware initializes LittleFS automatically if it cannot mount it, so a
+freshly flashed device can receive character packs without a factory reset.
+Recovery formatting deletes any characters on an unreadable filesystem, but
+leaves settings, statistics, and BLE bonds intact. If startup still reports
+`[char] LittleFS mount failed`, ASCII pets can still run, but GIF installation
+is unavailable; check the flash partition layout and serial startup log.
 The RTC waits for a desktop time sync before its time is used.
 
 ## Pairing

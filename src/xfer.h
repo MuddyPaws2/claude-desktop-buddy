@@ -148,6 +148,10 @@ inline bool xferCommand(JsonDocument& doc) {
   }
 
   if (strcmp(cmd, "char_begin") == 0) {
+    if (!LittleFS.begin(false)) {
+      _xAck("char_begin", false);
+      return true;
+    }
     const char* name = doc["name"] | "pet";
     _xTotal = doc["total"] | 0;
 
@@ -184,10 +188,15 @@ inline bool xferCommand(JsonDocument& doc) {
     }
 
     strncpy(_xCharName, name, sizeof(_xCharName)-1); _xCharName[sizeof(_xCharName)-1]=0;
+    _xActive = false;
+    if (_xFile) _xFile.close();
     characterClose();
     _xWipeAllChars();
     char dir[48]; snprintf(dir, sizeof(dir), "/characters/%s", _xCharName);
-    LittleFS.mkdir(dir);
+    if (!LittleFS.mkdir(dir) && !LittleFS.exists(dir)) {
+      _xAck("char_begin", false);
+      return true;
+    }
     _xTotalWritten = 0;
     _xActive = true;
     _xAck("char_begin", true);
@@ -215,12 +224,12 @@ inline bool xferCommand(JsonDocument& doc) {
     int rc = mbedtls_base64_decode(buf, sizeof(buf), &outLen,
                                    (const uint8_t*)b64, strlen(b64));
     if (rc != 0) { _xAck("chunk", false); return true; }
-    _xFile.write(buf, outLen);
-    _xWritten += outLen;
-    _xTotalWritten += outLen;
+    size_t written = _xFile.write(buf, outLen);
+    _xWritten += written;
+    _xTotalWritten += written;
     // Ack every chunk — LittleFS writes can block on flash erase and the
     // UART RX buffer is only ~256 bytes. Without this the sender overruns it.
-    _xAck("chunk", true, _xWritten);
+    _xAck("chunk", written == outLen, _xWritten);
     return true;
   }
 
