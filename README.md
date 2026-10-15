@@ -22,10 +22,23 @@ waiting, and lets you approve or deny right from the device.
 
 ## Hardware
 
-The firmware targets ESP32 with the Arduino framework. As written, it
-depends on the M5StickCPlus library for its display, IMU, and button
-drivers—so you'll need that board, or a fork that swaps those drivers for
-your own pin layout.
+The firmware targets ESP32 with the Arduino framework and supports two boards:
+
+| Board | PlatformIO environment | Hardware library |
+| ----- | ---------------------- | ---------------- |
+| M5StickC Plus | `m5stickc-plus` | M5StickCPlus |
+| M5StickC Plus2 (default) | `m5stack-stickc-plus2` | M5Unified / M5GFX |
+
+The targets use separate display, power, sound, RTC, and LED drivers. Do not
+add M5Unified alongside M5StickCPlus in the same environment: both define the
+global `M5` object and cause a multiple-definition linker error.
+
+Plus2 has no AXP192 USB-voltage, battery-current, or PMIC-temperature sensing.
+Those readings show as unavailable (and unsupported status fields are omitted).
+Battery voltage and estimated percentage remain available. Automatic
+USB-powered clock mode and the USB auto-screen-off exemption are unavailable
+on Plus2; its screen still sleeps after 30 seconds and wakes on A/B or a short
+power-key press.
 
 ## Flashing
 
@@ -34,17 +47,36 @@ Install
 then:
 
 ```bash
-pio run -t upload
+pio run -e m5stack-stickc-plus2 -t upload
+pio device monitor -e m5stack-stickc-plus2
 ```
 
-If you're starting from a previously-flashed device, wipe it first:
+For the original Plus, use `-e m5stickc-plus` instead. Build without flashing
+with `pio run -e m5stack-stickc-plus2 -e m5stickc-plus`.
+
+If you're starting from incompatible firmware, you can wipe it first.
+**This deletes installed characters, settings, pairing keys, and statistics:**
 
 ```bash
-pio run -t erase && pio run -t upload
+pio run -e m5stack-stickc-plus2 -t erase
+pio run -e m5stack-stickc-plus2 -t upload
 ```
+
+Close any existing serial monitor before uploading. Upload the full firmware,
+not only the application image, when changing partition layouts. At 115200
+baud, startup now prints `boot: ... hardware init`, `boot: hardware ready`,
+and BLE initialization progress. If it resets before the first marker, the
+failure is earlier than application hardware initialization; capture that
+log rather than disabling the watchdog.
 
 Once running, you can also wipe everything from the device itself: **hold A
 → settings → reset → factory reset → tap twice**.
+
+If startup reports `[char] LittleFS mount failed`, ASCII pets can still run,
+but GIF installation needs an initialized filesystem. The factory-reset
+action above formats it and also clears settings, statistics, and BLE bonds;
+the firmware does not automatically format storage on a mount failure.
+The RTC waits for a desktop time sync before its time is used.
 
 ## Pairing
 

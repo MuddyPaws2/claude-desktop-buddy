@@ -1,4 +1,4 @@
-#include <M5StickCPlus.h>
+#include "hardware.h"
 #include <LittleFS.h>
 #include <stdarg.h>
 #include "ble_bridge.h"
@@ -23,7 +23,6 @@ static void startBt() {
 const int W = 135, H = 240;
 const int CX = W / 2;
 const int CY_BASE = 120;
-const int LED_PIN = 10;          // red LED, active-low
 
 // Colors used across multiple UI surfaces
 const uint16_t HOT   = 0xFA20;   // red-orange: warnings, impatience, deny
@@ -94,12 +93,12 @@ static bool isFaceDown() {
   return az < -0.7f && fabsf(ax) < 0.4f && fabsf(ay) < 0.4f;
 }
 
-static void applyBrightness() { M5.Axp.ScreenBreath(20 + brightLevel * 20); }
+static void applyBrightness() { hardwareBrightness(20 + brightLevel * 20); }
 
 static void wake() {
   lastInteractMs = millis();
   if (screenOff) {
-    M5.Axp.SetLDO2(true);
+    hardwareScreen(true);
     applyBrightness();
     screenOff = false;
     wakeTransitionUntil = millis() + 12000;
@@ -109,7 +108,7 @@ static void wake() {
 bool     responseSent = false;
 
 static void beep(uint16_t freq, uint16_t dur) {
-  if (settings().sound) M5.Beep.tone(freq, dur);
+  if (settings().sound) hardwareTone(freq, dur);
 }
 
 static void sendCmd(const char* json) {
@@ -305,7 +304,7 @@ static void drawReset() {
 void menuConfirm() {
   switch (menuSel) {
     case 0: settingsOpen = true; menuOpen = false; settingsSel = 0; break;
-    case 1: M5.Axp.PowerOff(); break;
+    case 1: hardwarePowerOff(); break;
     case 2:
     case 3:
       menuOpen = false;
@@ -356,9 +355,8 @@ static bool            _onUsb       = false;
 static void clockRefreshRtc() {
   if (millis() - _clkLastRead < 1000) return;
   _clkLastRead = millis();
-  _onUsb = M5.Axp.GetVBusVoltage() > 4.0f;
-  M5.Rtc.GetTime(&_clkTm);
-  M5.Rtc.GetDate(&_clkDt);
+  _onUsb = hardwareUsb() == HardwareUsb::Connected;
+  if (dataRtcValid()) hardwareRtcRead(_clkTm, _clkDt);
 }
 
 static void clockUpdateOrient() {
@@ -593,7 +591,15 @@ void drawInfo() {
   } else if (infoPage == 3) {
     _infoHeader(p, y, "DEVICE", infoPage);
 
-    int vBat_mV = (int)(M5.Axp.GetBatVoltage() * 1000);
+    int vBat_mV = hardwareBatteryMV();
+#ifdef BUDDY_STICKC_PLUS2
+    spr.setTextColor(p.textDim, p.bg);
+    ln("  battery  %d.%02dV", vBat_mV/1000, (vBat_mV%1000)/10);
+    ln("  current  n/a");
+    ln("  usb      n/a");
+    ln("  charging n/a");
+    y += 8;
+#else
     int iBat_mA = (int)M5.Axp.GetBatCurrent();
     int vBus_mV = (int)(M5.Axp.GetVBusVoltage() * 1000);
     int pct = (vBat_mV - 3200) / 10;   // (v-3.2)/(4.2-3.2)*100 = (v-3.2)*100 = (mv-3200)/10
@@ -617,6 +623,7 @@ void drawInfo() {
     ln("  current  %+dmA", iBat_mA);
     if (usb) ln("  usb in   %d.%02dV", vBus_mV/1000, (vBus_mV%1000)/10);
     y += 8;
+#endif
 
     spr.setTextColor(p.text, p.bg);
     ln("SYSTEM");
@@ -627,7 +634,9 @@ void drawInfo() {
     ln("  heap     %uKB", ESP.getFreeHeap() / 1024);
     ln("  bright   %u/4", brightLevel);
     ln("  bt       %s", settings().bt ? (dataBtActive() ? "linked" : "on") : "off");
+#ifndef BUDDY_STICKC_PLUS2
     ln("  temp     %dC", (int)M5.Axp.GetTempInAXP192());
+#endif
 
   } else if (infoPage == 4) {
     _infoHeader(p, y, "BLUETOOTH", infoPage);
@@ -682,8 +691,12 @@ void drawInfo() {
     spr.setTextColor(p.textDim, p.bg);
     ln("hardware");
     y += 4;
-    ln("M5StickC Plus");
+    ln("%s", HARDWARE_NAME);
+#ifdef BUDDY_STICKC_PLUS2
+    ln("ESP32 + M5Unified");
+#else
     ln("ESP32 + AXP192");
+#endif
   }
 }
 
@@ -936,13 +949,13 @@ void drawHUD() {
 }
 
 void setup() {
-  M5.begin();
+  hardwareBegin();
   M5.Lcd.setRotation(0);
-  M5.Imu.Init();
-  M5.Beep.begin();
+  Serial.println("boot: BLE init");
   startBt();
+  Serial.println("boot: BLE ready");
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, HIGH);   // off
+  digitalWrite(LED_PIN, LED_OFF);
   applyBrightness();
   lastInteractMs = millis();
   statsLoad();
@@ -951,7 +964,10 @@ void setup() {
   buddyInit();
 
   // BLE stays always-on; s.bt is stored as a preference only.
-  spr.createSprite(W, H);
+  if (!spr.createSprite(W, H)) {
+    Serial.println("ERROR: display sprite allocation failed");
+    while (true) delay(1000);
+  }
   characterInit(nullptr);  // scan /characters/ for whatever is installed
   gifAvailable = characterLoaded();
   // species NVS: 0..N-1 = ASCII species, 0xFF = use GIF (also the default,
@@ -986,8 +1002,7 @@ void setup() {
 }
 
 void loop() {
-  M5.update();
-  M5.Beep.update();
+  hardwareUpdate();
   t++;
   uint32_t now = millis();
 
@@ -1003,9 +1018,9 @@ void loop() {
 
   // LED: pulse on attention, otherwise off
   if (activeState == P_ATTENTION && settings().led) {
-    digitalWrite(LED_PIN, (now / 400) % 2 ? LOW : HIGH);
+    digitalWrite(LED_PIN, (now / 400) % 2 ? LED_ON : LED_OFF);
   } else {
-    digitalWrite(LED_PIN, HIGH);
+    digitalWrite(LED_PIN, LED_OFF);
   }
 
   // shake → dizzy + force scenario advance
@@ -1051,13 +1066,12 @@ void loop() {
     wake();
   }
 
-  // AXP power button (left side): short-press toggles screen off.
-  // Long-press (6s) still powers off the device via AXP hardware.
-  if (M5.Axp.GetBtnPress() == 0x02) {
+  // Short power-key press toggles the display; holding it powers off.
+  if (hardwarePowerClicked()) {
     if (screenOff) {
       wake();
     } else {
-      M5.Axp.SetLDO2(false);
+      hardwareScreen(false);
       screenOff = true;
     }
   }
@@ -1243,7 +1257,7 @@ void loop() {
   if (!napping && faceDownFrames >= 15) {
     napping = true;
     napStartMs = now;
-    M5.Axp.ScreenBreath(8);
+    hardwareBrightness(8);
     dimmed = true;
   } else if (napping && faceDownFrames <= -8) {
     napping = false;
@@ -1257,7 +1271,7 @@ void loop() {
   // No auto-off on USB power — clock face wants to stay visible while charging.
   if (!screenOff && !inPrompt && !_onUsb
       && millis() - lastInteractMs > SCREEN_OFF_MS) {
-    M5.Axp.SetLDO2(false);
+    hardwareScreen(false);
     screenOff = true;
   }
 

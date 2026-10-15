@@ -155,6 +155,9 @@ populate the Hardware Buddy window's stats panel:
 ```
 
 You can omit fields you don't have. `bat.mA` negative means charging.
+The Plus2 target omits `bat.mA` and `bat.usb`: its hardware cannot measure
+battery current or USB input voltage. Do not interpret missing fields as zero
+current or a disconnected USB cable.
 
 ## Folder push
 
